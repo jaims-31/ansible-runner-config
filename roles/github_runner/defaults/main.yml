@@ -3,3 +3,14 @@ github_runner_base_packages:
   - tar
   - git
   - jq
+
+github_runner_version: "2.337.0"
+
+github_runner_user: runner
+
+github_runner_repo: "jaims-31/bilan-azure-quiz-backend"
+
+github_runner_name: "vm-runner-fbarry"
+github_runner_labels: "azure,francecentral"
+
+github_runner_dir: "/opt/actions-runner/{{ github_runner_repo | replace('/', '-') }}"

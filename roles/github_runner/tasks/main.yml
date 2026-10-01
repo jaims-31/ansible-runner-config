@@ -5,3 +5,34 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+
+- name: Create runner user
+  ansible.builtin.user:
+    name: "{{ github_runner_user }}"
+    shell: /bin/bash
+    create_home: true
+
+- name: Create runner directory
+  ansible.builtin.file:
+    path: "{{ github_runner_dir }}"
+    state: directory
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    mode: "0755"
+
+- name: Download and extract runner agent
+  ansible.builtin.unarchive:
+    src: "https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    dest: "{{ github_runner_dir }}"
+    remote_src: true
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    creates: "{{ github_runner_dir }}/config.sh"
+
+- name: Install runner system dependencies
+  ansible.builtin.shell:
+    cmd: ./bin/installdependencies.sh && touch .deps_installed
+    chdir: "{{ github_runner_dir }}"
+    creates: "{{ github_runner_dir }}/.deps_installed"
+  changed_when: true
