@@ -35,4 +35,3 @@
     cmd: ./bin/installdependencies.sh && touch .deps_installed
     chdir: "{{ github_runner_dir }}"
     creates: "{{ github_runner_dir }}/.deps_installed"
-  changed_when: true
