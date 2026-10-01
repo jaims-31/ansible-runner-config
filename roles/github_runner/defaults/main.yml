@@ -1,0 +1,5 @@
+github_runner_base_packages:
+  - curl
+  - tar
+  - git
+  - jq
