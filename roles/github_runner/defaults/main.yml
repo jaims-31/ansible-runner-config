@@ -1,4 +1,5 @@
 github_runner_base_packages:
+  - acl
   - curl
   - tar
   - git
@@ -14,3 +15,5 @@ github_runner_name: "vm-runner-fbarry"
 github_runner_labels: "azure,francecentral"
 
 github_runner_dir: "/opt/actions-runner/{{ github_runner_repo | replace('/', '-') }}"
+
+github_runner_pat: "{{ lookup('env', 'GITHUB_PAT') }}"
