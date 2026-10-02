@@ -1,0 +1,83 @@
+name: Configure runner VM (Ansible)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ansible.cfg"
+      - "playbook.yml"
+      - "roles/**"
+      - ".github/workflows/configure-runner.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: configure-runner
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: fbarryRG
+  NSG_NAME: nsg-runner-fbarry
+  VM_NAME: vm-runner-fbarry
+  SSH_USER: azureuser
+  NSG_RULE_NAME: allow-ssh-ci-${{ github.run_id }}
+
+jobs:
+  ansible:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get IPs (runner and VM)
+        id: ips
+        run: |
+          echo "runner_ip=$(curl -s https://api.ipify.org)" >> "$GITHUB_OUTPUT"
+          echo "vm_ip=$(az vm show -d -g "$RESOURCE_GROUP" -n "$VM_NAME" --query publicIps -o tsv)" >> "$GITHUB_OUTPUT"
+
+      - name: Open SSH temporarily for this runner
+        run: |
+          az network nsg rule create \
+            -g "$RESOURCE_GROUP" --nsg-name "$NSG_NAME" -n "$NSG_RULE_NAME" \
+            --priority 200 --direction Inbound --access Allow --protocol Tcp \
+            --source-address-prefixes "${{ steps.ips.outputs.runner_ip }}/32" \
+            --destination-port-ranges 22 --output none
+
+      - name: Set up SSH key and pin host key
+        env:
+          SSH_KEY: ${{ secrets.RUNNER_SSH_PRIVATE_KEY }}
+          VM_IP: ${{ steps.ips.outputs.vm_ip }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/runner && chmod 600 ~/.ssh/runner
+          for i in $(seq 1 12); do
+            ssh-keyscan -H "$VM_IP" >> ~/.ssh/known_hosts 2>/dev/null && break
+            echo "SSH pas encore ouvert, nouvel essai dans 5s ($i/12)"; sleep 5
+          done
+          test -s ~/.ssh/known_hosts
+
+      - name: Install Ansible
+        run: pipx install ansible-core
+
+      - name: Run playbook
+        env:
+          GITHUB_PAT: ${{ secrets.RUNNER_REGISTRATION_PAT }}
+        run: |
+          ansible-playbook -i "${{ steps.ips.outputs.vm_ip }}," \
+            -u "$SSH_USER" --private-key ~/.ssh/runner playbook.yml
+
+      - name: Close temporary SSH rule
+        if: always()
+        run: |
+          az network nsg rule delete \
+            -g "$RESOURCE_GROUP" --nsg-name "$NSG_NAME" -n "$NSG_RULE_NAME" --output none
