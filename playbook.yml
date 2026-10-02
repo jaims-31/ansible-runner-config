@@ -1,0 +1,6 @@
+---
+- name: Configurer le runner
+  hosts: all
+  become: true
+  roles:
+    - github_runner

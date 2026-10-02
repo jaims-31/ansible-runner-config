@@ -1,0 +1,86 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ github_runner_base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 600
+
+
+- name: Create runner user
+  ansible.builtin.user:
+    name: "{{ github_runner_user }}"
+    shell: /bin/bash
+    create_home: true
+
+- name: Create runner directory
+  ansible.builtin.file:
+    path: "{{ github_runner_dir }}"
+    state: directory
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    mode: "0755"
+
+- name: Download and extract runner agent
+  ansible.builtin.unarchive:
+    src: "https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-linux-x64-{{ github_runner_version }}.tar.gz"
+    dest: "{{ github_runner_dir }}"
+    remote_src: true
+    owner: "{{ github_runner_user }}"
+    group: "{{ github_runner_user }}"
+    creates: "{{ github_runner_dir }}/config.sh"
+
+- name: Install runner system dependencies
+  ansible.builtin.shell:
+    cmd: ./bin/installdependencies.sh && touch .deps_installed
+    chdir: "{{ github_runner_dir }}"
+    creates: "{{ github_runner_dir }}/.deps_installed"
+
+
+- name: Check if runner is already configured
+  ansible.builtin.stat:
+    path: "{{ github_runner_dir }}/.runner"
+  register: github_runner_config_file
+
+- name: Request a fresh registration token from GitHub API
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ github_runner_repo }}/actions/runners/registration-token"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ github_runner_pat }}"
+      Accept: application/vnd.github+json
+    status_code: 201
+  register: github_runner_registration
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: not github_runner_config_file.stat.exists
+
+- name: Configure runner
+  ansible.builtin.command:
+    cmd: >-
+      ./config.sh --unattended
+      --url https://github.com/{{ github_runner_repo }}
+      --token {{ github_runner_registration.json.token }}
+      --name {{ github_runner_name }}
+      --labels {{ github_runner_labels }}
+      --work _work
+    chdir: "{{ github_runner_dir }}"
+    creates: "{{ github_runner_dir }}/.runner"
+  become: true
+  become_user: "{{ github_runner_user }}"
+  no_log: true
+  when: not github_runner_config_file.stat.exists
+
+- name: Install runner as a systemd service
+  ansible.builtin.command:
+    cmd: ./svc.sh install {{ github_runner_user }}
+    chdir: "{{ github_runner_dir }}"
+    creates: "/etc/systemd/system/actions.runner.{{ github_runner_repo | replace('/', '-') }}.{{ github_runner_name }}.service"
+
+- name: Start and enable runner service
+  ansible.builtin.systemd_service:
+    name: "actions.runner.{{ github_runner_repo | replace('/', '-') }}.{{ github_runner_name }}.service"
+    state: started
+    enabled: true
